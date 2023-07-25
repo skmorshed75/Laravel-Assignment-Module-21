@@ -1,0 +1,261 @@
+Assignment: 
+Submitted by : Sheikh Mohammed Morshed
+
+Create a multi-user todo backend API using Laravel, implementing a JWT token-based authentication system. The API will allow users to create, read, update, and delete their todo items securely using JWT for authentication.
+----------------------------------------------------------------------------------------------------------------------------------------
+
+Step 1: Set Up Laravel Project
+-------------------------------
+composer create-project laravel/laravel todo-api
+cd todo-api
+
+Step 2: Set Up Database
+------------------------
+Configure your database credentials in the .env file and create a new database for the project.
+
+Step 3: Install Required Packages
+---------------------------------
+composer require tymon/jwt-auth
+composer require laravel/passport
+
+Step 4: Configure JWT Authentication
+------------------------------------
+php artisan vendor:publish --provider="Tymon\JWTAuth\Providers\LaravelServiceProvider"
+php artisan jwt:secret
+
+Step 5: Set Up User Model and Migration
+---------------------------------------
+php artisan make:model User -m
+
+create_users_table.php
+write following code :
+public function up()
+{
+    Schema::create('users', function (Blueprint $table) {
+        $table->id();
+        $table->string('name');
+        $table->string('email')->unique();
+        $table->string('password');
+        $table->timestamps();
+    });
+}
+
+Step 6: Run Migrations
+----------------------
+php artisan migrate
+
+Step 7: Implement JWT Authentication
+--------------------------------------
+In the User model (app/Models/User.php), use the HasApiTokens trait from Laravel Passport:
+write following code :
+use Laravel\Passport\HasApiTokens;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+
+class User extends Authenticatable
+{
+    use HasApiTokens, Notifiable;
+    // ...
+}
+
+Step 8: Set Up Authentication Routes
+------------------------------------
+Define routes for user registration, login, and logout in routes/api.php
+use App\Http\Controllers\AuthController;
+
+Route::post('register', [AuthController::class, 'register']);
+Route::post('login', [AuthController::class, 'login']);
+Route::middleware('auth:api')->post('logout', [AuthController::class, 'logout']);
+
+Step 9: Create Todo Model and Migration
+----------------------------------------
+php artisan make:model Todo -m
+
+Edit the migration file (create_todos_table.php) to include the necessary fields:
+public function up()
+{
+    Schema::create('todos', function (Blueprint $table) {
+        $table->id();
+        $table->string('title');
+        $table->text('description');
+        $table->unsignedBigInteger('user_id');
+        $table->timestamps();
+
+        $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
+    });
+}
+
+Step 10: Define Todo API Routes
+--------------------------------
+Define routes for CRUD operations on todo items in routes/api.php:
+use App\Http\Controllers\TodoController;
+
+Route::middleware('auth:api')->group(function () {
+    Route::resource('todos', TodoController::class);
+});
+
+
+Step 11: Implement Todo Controller
+----------------------------------
+Create a controller to handle CRUD operations for todo items:
+php artisan make:controller TodoController
+
+In the TodoController (app/Http/Controllers/TodoController.php), implement methods to create, read, update, and delete todo items for the authenticated user:
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Models\Todo;
+
+class TodoController extends Controller
+{
+    public function index()
+    {
+        $user = auth()->user();
+        $todos = $user->todos()->latest()->get();
+
+        return response()->json(['todos' => $todos]);
+    }
+
+    public function store(Request $request)
+    {
+        $user = auth()->user();
+        $todo = new Todo([
+            'title' => $request->input('title'),
+            'description' => $request->input('description'),
+        ]);
+        $user->todos()->save($todo);
+
+        return response()->json(['message' => 'Todo created successfully', 'todo' => $todo], 201);
+    }
+
+    public function show($id)
+    {
+        $todo = Todo::findOrFail($id);
+        $this->authorize('view', $todo);
+
+        return response()->json(['todo' => $todo]);
+    }
+
+    public function update(Request $request, $id)
+    {
+        $todo = Todo::findOrFail($id);
+        $this->authorize('update', $todo);
+
+        $todo->update([
+            'title' => $request->input('title'),
+            'description' => $request->input('description'),
+        ]);
+
+        return response()->json(['message' => 'Todo updated successfully', 'todo' => $todo]);
+    }
+
+    public function destroy($id)
+    {
+        $todo = Todo::findOrFail($id);
+        $this->authorize('delete', $todo);
+
+        $todo->delete();
+
+        return response()->json(['message' => 'Todo deleted successfully']);
+    }
+}
+
+Step 12: Implement JWT Middleware
+----------------------------------
+Create a middleware to protect the Todo API routes with JWT authentication:
+php artisan make:middleware JwtMiddleware
+
+Modify the handle method in the JwtMiddleware (app/Http/Middleware/JwtMiddleware.php) to check for the JWT token and authenticate the user:
+use Tymon\JWTAuth\Facades\JWTAuth;
+use Closure;
+
+class JwtMiddleware
+{
+    public function handle($request, Closure $next)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        return $next($request);
+    }
+}
+
+
+Step 13: Configure Middleware
+-------------------------------
+Register the JwtMiddleware in app/Http/Kernel.php:
+protected $routeMiddleware = [
+    // ...
+    'auth.jwt' => \App\Http\Middleware\JwtMiddleware::class,
+];
+
+
+Step 14: Update AuthController
+--------------------------------
+Create an AuthController to handle user registration, login, and logout:
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
+
+class AuthController extends Controller
+{
+    public function register(Request $request)
+    {
+        $validatedData = $request->validate([
+            'name' => 'required|max:55',
+            'email' => 'email|required|unique:users',
+            'password' => 'required|confirmed',
+        ]);
+
+        $validatedData['password'] = bcrypt($request->password);
+
+        $user = User::create($validatedData);
+
+        $token = auth()->login($user);
+
+        return $this->respondWithToken($token);
+    }
+
+    public function login()
+    {
+        $credentials = request(['email', 'password']);
+
+        if (!$token = auth()->attempt($credentials)) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        return $this->respondWithToken($token);
+    }
+
+    public function logout()
+    {
+        auth()->logout();
+
+        return response()->json(['message' => 'Successfully logged out']);
+    }
+
+    protected function respondWithToken($token)
+    {
+        return response()->json([
+            'access_token' => $token,
+            'token_type' => 'bearer',
+            'expires_in' => auth()->factory()->getTTL() * 60,
+        ]);
+    }
+}
+
+Step 15: Test the API Endpoints
+-------------------------------
+Use tools like Postman or any API testing tool to test the implemented endpoints for user registration, login, and CRUD operations on todo items.
+

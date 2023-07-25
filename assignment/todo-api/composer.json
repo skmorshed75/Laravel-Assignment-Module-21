@@ -1,0 +1,6 @@
+{
+    "require": {
+        "tymon/jwt-auth": "^2.0",
+        "laravel/passport": "^11.8"
+    }
+}
